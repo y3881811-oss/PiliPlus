@@ -33,4 +33,4 @@ jobs:
       - name: Build Android APK
         run: |
           cd android
-          gradle assembleRelease --no-daemon
+          gradle assembleRelease --no-daemon --stacktrace --info

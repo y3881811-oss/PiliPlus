@@ -3,16 +3,13 @@ name: Build PiliPlus APK
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -23,15 +20,21 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.2'   # 官方稳定版
+          flutter-version: '3.29.2'
 
-      # ⭐ 关键：修正 pubspec.yaml 中的版本约束
-      - name: Fix version constraints
+      - name: Fix pubspec.yaml
         run: |
+          # 修正环境约束
           sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
           sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
-          echo "✅ Modified pubspec.yaml:"
-          grep -A 2 "^environment:" pubspec.yaml || true
+          # 降级 lints
+          sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
+          # 修正 vector_math（如果有）
+          sed -i 's/vector_math: \^2\.2\.0/vector_math: 2.1.4/g' pubspec.yaml
+          # 可选：注释掉有问题的 Git 依赖（如果拉取失败）
+          # sed -i '/cached_network_image_ce:/,/path:/s/^/# /' pubspec.yaml
+          echo "🔧 Modified dependencies:"
+          grep -E "sdk:|flutter:|flutter_lints:|vector_math:" pubspec.yaml || true
 
       - name: Install dependencies
         run: flutter pub get

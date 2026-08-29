@@ -29,12 +29,14 @@ jobs:
           sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
           # 降级 lints
           sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
-          # 修正 vector_math（如果有）
+          # 修正 vector_math
           sed -i 's/vector_math: \^2\.2\.0/vector_math: 2.1.4/g' pubspec.yaml
-          # 可选：注释掉有问题的 Git 依赖（如果拉取失败）
-          # sed -i '/cached_network_image_ce:/,/path:/s/^/# /' pubspec.yaml
+          # 强制 win32 版本
+          echo "" >> pubspec.yaml
+          echo "dependency_overrides:" >> pubspec.yaml
+          echo "  win32: 5.13.0" >> pubspec.yaml
           echo "🔧 Modified dependencies:"
-          grep -E "sdk:|flutter:|flutter_lints:|vector_math:" pubspec.yaml || true
+          grep -E "sdk:|flutter:|flutter_lints:|vector_math:|win32:" pubspec.yaml || true
 
       - name: Install dependencies
         run: flutter pub get

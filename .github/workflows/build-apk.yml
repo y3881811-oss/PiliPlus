@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # 支持手动触发
+  workflow_dispatch:
 
 jobs:
   build-android:
@@ -23,7 +23,15 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.2' # 使用你之前手动下载的版本
+          flutter-version: '3.29.2'   # 官方稳定版
+
+      # ⭐ 关键：修正 pubspec.yaml 中的版本约束
+      - name: Fix version constraints
+        run: |
+          sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
+          sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
+          echo "✅ Modified pubspec.yaml:"
+          grep -A 2 "^environment:" pubspec.yaml || true
 
       - name: Install dependencies
         run: flutter pub get

@@ -27,28 +27,36 @@ jobs:
           # 1. 修正环境约束
           sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
           sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
+
           # 2. 降级 flutter_lints
           sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
+
           # 3. 修正 vector_math
           sed -i 's/vector_math: \^2\.2\.0/vector_math: 2.1.4/g' pubspec.yaml
-          
-          # 4. 智能处理 win32 依赖（避免重复 dependency_overrides）
+
+          # 4. 智能处理 dependency_overrides（添加 win32 和 material_color_utilities）
           if grep -q "^dependency_overrides:" pubspec.yaml; then
-            # 如果已存在，则修改其中的 win32 版本（如果已有则替换，否则添加）
+            # 已存在 dependency_overrides
             if grep -q "win32:" pubspec.yaml; then
               sed -i 's/win32:.*/win32: 5.13.0/g' pubspec.yaml
             else
               sed -i '/^dependency_overrides:/a\  win32: 5.13.0' pubspec.yaml
             fi
+            if grep -q "material_color_utilities:" pubspec.yaml; then
+              sed -i 's/material_color_utilities:.*/material_color_utilities: 0.11.1/g' pubspec.yaml
+            else
+              sed -i '/^dependency_overrides:/a\  material_color_utilities: 0.11.1' pubspec.yaml
+            fi
           else
-            # 如果不存在，则追加
+            # 不存在 dependency_overrides，追加
             echo "" >> pubspec.yaml
             echo "dependency_overrides:" >> pubspec.yaml
             echo "  win32: 5.13.0" >> pubspec.yaml
+            echo "  material_color_utilities: 0.11.1" >> pubspec.yaml
           fi
-          
-          echo "🔧 Modified pubspec.yaml:"
-          grep -E "sdk:|flutter:|flutter_lints:|vector_math:|win32:" pubspec.yaml || true
+
+          echo "🔧 Modified pubspec.yaml (key overrides):"
+          grep -E "sdk:|flutter:|flutter_lints:|vector_math:|win32:|material_color_utilities:" pubspec.yaml || true
 
       - name: Install dependencies
         run: flutter pub get

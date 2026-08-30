@@ -3,14 +3,13 @@ name: Build PiliPlus APK
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:   # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -21,25 +20,22 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          # 项目实际需要的版本（3.44.8），若不可用可尝试 3.38.4 或 3.41.6
-          flutter-version: '3.44.8'
+          flutter-version: '3.44.8'   # 项目所需版本
           channel: 'stable'
 
-      - name: Fix pubspec.yaml (version constraints & overrides)
+      - name: Fix pubspec.yaml
         run: |
-          # 1. 修正环境约束（Dart SDK 和 Flutter）
+          # 修正环境约束
           sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
           sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
 
-          # 2. 降级 flutter_lints（适应 Dart 3.7.x）
+          # 降级 flutter_lints
           sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
 
-          # 3. 修正 vector_math（锁定为 SDK 内置版本）
-          sed -i 's/vector_math: \^2\.2\.0/vector_math: 2.1.4/g' pubspec.yaml
+          # ⚠️ 不再修改 vector_math，保持项目原有的 ^2.2.0
 
-          # 4. 智能添加 dependency_overrides（处理所有已知冲突包）
+          # 添加 dependency_overrides（仅处理 win32, material_color_utilities, json_annotation）
           if grep -q "^dependency_overrides:" pubspec.yaml; then
-            # 已存在 dependency_overrides，修改或添加条目
             for pkg in win32 material_color_utilities json_annotation; do
               case $pkg in
                 win32) ver="5.13.0" ;;
@@ -53,7 +49,6 @@ jobs:
               fi
             done
           else
-            # 不存在 dependency_overrides，直接追加
             cat >> pubspec.yaml << EOF
 
           dependency_overrides:
@@ -63,9 +58,8 @@ jobs:
           EOF
           fi
 
-          # 打印修改后的关键部分以便调试
           echo "🔧 Modified pubspec.yaml:"
-          grep -E "sdk:|flutter:|flutter_lints:|vector_math:|win32:|material_color_utilities:|json_annotation:" pubspec.yaml || true
+          grep -E "sdk:|flutter:|flutter_lints:|win32:|material_color_utilities:|json_annotation:" pubspec.yaml || true
 
       - name: Install dependencies
         run: flutter pub get

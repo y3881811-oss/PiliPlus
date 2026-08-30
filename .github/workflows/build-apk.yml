@@ -3,13 +3,14 @@ name: Build PiliPlus APK
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
+  workflow_dispatch:   # 允许手动触发
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -20,51 +21,50 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.2'
+          # 项目实际需要的版本（3.44.8），若不可用可尝试 3.38.4 或 3.41.6
+          flutter-version: '3.44.8'
+          channel: 'stable'
 
-      - name: Fix pubspec.yaml
+      - name: Fix pubspec.yaml (version constraints & overrides)
         run: |
-          # 1. 修正环境约束
+          # 1. 修正环境约束（Dart SDK 和 Flutter）
           sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
           sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
 
-          # 2. 降级 flutter_lints
+          # 2. 降级 flutter_lints（适应 Dart 3.7.x）
           sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
 
-          # 3. 修正 vector_math
+          # 3. 修正 vector_math（锁定为 SDK 内置版本）
           sed -i 's/vector_math: \^2\.2\.0/vector_math: 2.1.4/g' pubspec.yaml
 
-          # 4. 智能处理 dependency_overrides
+          # 4. 智能添加 dependency_overrides（处理所有已知冲突包）
           if grep -q "^dependency_overrides:" pubspec.yaml; then
-            # 已存在 dependency_overrides
-            # 添加或修改 win32
-            if grep -q "win32:" pubspec.yaml; then
-              sed -i 's/win32:.*/win32: 5.13.0/g' pubspec.yaml
-            else
-              sed -i '/^dependency_overrides:/a\  win32: 5.13.0' pubspec.yaml
-            fi
-            # 添加或修改 material_color_utilities
-            if grep -q "material_color_utilities:" pubspec.yaml; then
-              sed -i 's/material_color_utilities:.*/material_color_utilities: 0.11.1/g' pubspec.yaml
-            else
-              sed -i '/^dependency_overrides:/a\  material_color_utilities: 0.11.1' pubspec.yaml
-            fi
-            # 添加或修改 json_annotation
-            if grep -q "json_annotation:" pubspec.yaml; then
-              sed -i 's/json_annotation:.*/json_annotation: 4.9.0/g' pubspec.yaml
-            else
-              sed -i '/^dependency_overrides:/a\  json_annotation: 4.9.0' pubspec.yaml
-            fi
+            # 已存在 dependency_overrides，修改或添加条目
+            for pkg in win32 material_color_utilities json_annotation; do
+              case $pkg in
+                win32) ver="5.13.0" ;;
+                material_color_utilities) ver="0.11.1" ;;
+                json_annotation) ver="4.9.0" ;;
+              esac
+              if grep -q "$pkg:" pubspec.yaml; then
+                sed -i "s/$pkg:.*/$pkg: $ver/g" pubspec.yaml
+              else
+                sed -i "/^dependency_overrides:/a\  $pkg: $ver" pubspec.yaml
+              fi
+            done
           else
-            # 不存在 dependency_overrides，追加
-            echo "" >> pubspec.yaml
-            echo "dependency_overrides:" >> pubspec.yaml
-            echo "  win32: 5.13.0" >> pubspec.yaml
-            echo "  material_color_utilities: 0.11.1" >> pubspec.yaml
-            echo "  json_annotation: 4.9.0" >> pubspec.yaml
+            # 不存在 dependency_overrides，直接追加
+            cat >> pubspec.yaml << EOF
+
+          dependency_overrides:
+            win32: 5.13.0
+            material_color_utilities: 0.11.1
+            json_annotation: 4.9.0
+          EOF
           fi
 
-          echo "🔧 Modified pubspec.yaml (key overrides):"
+          # 打印修改后的关键部分以便调试
+          echo "🔧 Modified pubspec.yaml:"
           grep -E "sdk:|flutter:|flutter_lints:|vector_math:|win32:|material_color_utilities:|json_annotation:" pubspec.yaml || true
 
       - name: Install dependencies

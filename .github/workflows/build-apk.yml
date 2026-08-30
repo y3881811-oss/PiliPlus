@@ -1,74 +1,173 @@
-name: Build PiliPlus APK
+name: Build
 
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+    pull_request:
+        types:
+            - opened
+            - synchronize
+            - reopened
+            - ready_for_review
+        paths-ignore:
+            - "**.md"
+    workflow_dispatch:
+        inputs:
+            build_android:
+                description: "Build Android"
+                required: false
+                default: true
+                type: boolean
+
+            build_ios:
+                description: "Build iOS"
+                required: false
+                default: true
+                type: boolean
+
+            build_mac:
+                description: "Build Mac"
+                required: false
+                default: true
+                type: boolean
+
+            build_win_x64:
+                description: "Build Win-x64"
+                required: false
+                default: true
+                type: boolean
+
+            build_linux_x64:
+                description: "Build Linux-x64"
+                required: false
+                default: true
+                type: boolean
+
+            tag:
+                description: "tag"
+                required: false
+                default: ""
+                type: string
 
 jobs:
-  build-android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    android:
+        if: ${{ (github.event_name == 'pull_request' && github.repository == 'bggRGjQaUbCoE/PiliPlus') || github.event.inputs.build_android == 'true' }}
+        name: Release Android
+        runs-on: ubuntu-latest
+        permissions: write-all
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+        steps:
+            - name: 代码迁出
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: 构建Java环境
+              uses: actions/setup-java@v5
+              with:
+                  distribution: "zulu"
+                  java-version: "17"
+                  cache: "gradle"
+                  cache-dependency-path: |
+                      android/*.gradle*
+                      android/**/gradle-wrapper.properties
+
+            - name: 安装Flutter
+              uses: subosito/flutter-action@v2
+              id: flutter-action
+              with:
+                  channel: stable
+                  flutter-version-file: pubspec.yaml
+                  cache: true
+
+            - name: Apply Patch
+              shell: pwsh
+              run: lib/scripts/patch.ps1 android
+
+            - name: Write key
+              if: github.event_name == 'workflow_dispatch'
+              run: |
+                  if [ ! -z "${{ secrets.SIGN_KEYSTORE_BASE64 }}" ]; then
+                    echo "${{ secrets.SIGN_KEYSTORE_BASE64 }}" | base64 --decode > android/app/key.jks
+                    echo storeFile='key.jks' >> android/key.properties
+                    echo storePassword='${{ secrets.KEYSTORE_PASSWORD }}' >> android/key.properties
+                    echo keyAlias='${{ secrets.KEY_ALIAS }}' >> android/key.properties
+                    echo keyPassword='${{ secrets.KEY_PASSWORD }}' >> android/key.properties
+                  fi
+
+            - name: Set and Extract version
+              if: ${{ github.event_name == 'workflow_dispatch' }}
+              shell: pwsh
+              run: lib/scripts/build.ps1 android
+
+            - name: Flutter Build Release Apk
+              if: ${{ github.event_name == 'workflow_dispatch' }}
+              run: flutter build apk --release --split-per-abi --dart-define-from-file=pili_release.json --no-pub
+
+            - name: Flutter Build Dev Apk
+              if: ${{ github.event_name == 'pull_request' }}
+              run: |
+                  flutter build apk --release --split-per-abi --android-project-arg dev=1 --no-pub
+
+            - name: Rename
+              run: |
+                  for file in build/app/outputs/flutter-apk/app-*-release.apk; do
+                    abi=$(echo "$file" | sed -E 's|.*app-(.*)-release\.apk|\1|')
+                    mv "$file" "PiliPlus_android_${{ env.version }}_${abi}.apk"
+                  done
+              shell: bash
+
+            - name: Release
+              if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+              uses: softprops/action-gh-release@v3
+              with:
+                  tag_name: ${{ github.event.inputs.tag }}
+                  name: ${{ github.event.inputs.tag }}
+                  files: PiliPlus_android_*.apk
+
+            - name: 上传
+              uses: actions/upload-artifact@v7
+              with:
+                  archive: false
+                  name: Android_arm64-v8a
+                  path: PiliPlus_android_*_arm64-v8a.apk
+
+            - name: 上传
+              uses: actions/upload-artifact@v7
+              with:
+                  archive: false
+                  name: Android_armeabi-v7a
+                  path: PiliPlus_android_*_armeabi-v7a.apk
+
+            - name: 上传
+              uses: actions/upload-artifact@v7
+              with:
+                  archive: false
+                  name: Android_x86_64
+                  path: PiliPlus_android_*_x86_64.apk
+
+    ios:
+        if: ${{ (github.event_name == 'pull_request' && github.repository == 'bggRGjQaUbCoE/PiliPlus') || github.event.inputs.build_ios == 'true' }}
+        uses: ./.github/workflows/ios.yml
+        permissions: write-all
         with:
-          distribution: 'zulu'
-          java-version: '17'
+            tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+    mac:
+        if: ${{ github.event.inputs.build_mac == 'true' }}
+        uses: ./.github/workflows/mac.yml
+        permissions: write-all
         with:
-          flutter-version: '3.44.8'   # 项目所需版本
-          channel: 'stable'
+            tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
 
-      - name: Fix pubspec.yaml
-        run: |
-          # 修正环境约束
-          sed -i 's/sdk: ">=3\.13\.0"/sdk: ">=3.7.0"/g' pubspec.yaml
-          sed -i 's/flutter: 3\.47\.[0-9]*/flutter: ">=3.0.0"/g' pubspec.yaml
-
-          # 降级 flutter_lints
-          sed -i 's/flutter_lints: \^6\.0\.0/flutter_lints: ^5.0.0/g' pubspec.yaml
-
-          # ⚠️ 不再修改 vector_math，保持项目原有的 ^2.2.0
-
-          # 添加 dependency_overrides（仅处理 win32, material_color_utilities, json_annotation）
-          if grep -q "^dependency_overrides:" pubspec.yaml; then
-            for pkg in win32 material_color_utilities json_annotation; do
-              case $pkg in
-                win32) ver="5.13.0" ;;
-                material_color_utilities) ver="0.11.1" ;;
-                json_annotation) ver="4.9.0" ;;
-              esac
-              if grep -q "$pkg:" pubspec.yaml; then
-                sed -i "s/$pkg:.*/$pkg: $ver/g" pubspec.yaml
-              else
-                sed -i "/^dependency_overrides:/a\  $pkg: $ver" pubspec.yaml
-              fi
-            done
-          else
-            cat >> pubspec.yaml << EOF
-
-          dependency_overrides:
-            win32: 5.13.0
-            material_color_utilities: 0.11.1
-            json_annotation: 4.9.0
-          EOF
-          fi
-
-          echo "🔧 Modified pubspec.yaml:"
-          grep -E "sdk:|flutter:|flutter_lints:|win32:|material_color_utilities:|json_annotation:" pubspec.yaml || true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+    win_x64:
+        if: ${{ (github.event_name == 'pull_request' && github.repository == 'bggRGjQaUbCoE/PiliPlus') || github.event.inputs.build_win_x64 == 'true' }}
+        uses: ./.github/workflows/win_x64.yml
+        permissions: write-all
         with:
-          name: PiliPlus-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+            tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}
+
+    linux_x64:
+        if: ${{ github.event.inputs.build_linux_x64 == 'true' }}
+        uses: ./.github/workflows/linux_x64.yml
+        permissions: write-all
+        with:
+            tag: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || '' }}

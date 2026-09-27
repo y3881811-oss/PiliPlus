@@ -42,7 +42,7 @@ on:
                 type: boolean
 
             tag:
-                description: "tag"
+                description: "自定义tag（留空则自动生成时间戳版本号）"
                 required: false
                 default: ""
                 type: string
@@ -107,20 +107,33 @@ jobs:
               run: |
                   flutter build apk --release --split-per-abi --android-project-arg dev=1 --no-pub
 
+            # 新增：自动生成版本号（优先用你填写的tag，留空则用当前时间）
+            - name: Generate Version
+              id: generate_version
+              run: |
+                  if [ -z "${{ github.event.inputs.tag }}" ]; then
+                    VERSION="v$(date +'%Y%m%d-%H%M%S')"
+                  else
+                    VERSION="${{ github.event.inputs.tag }}"
+                  fi
+                  echo "TAG_NAME=$VERSION" >> $GITHUB_ENV
+              shell: bash
+
             - name: Rename
               run: |
                   for file in build/app/outputs/flutter-apk/app-*-release.apk; do
                     abi=$(echo "$file" | sed -E 's|.*app-(.*)-release\.apk|\1|')
-                    mv "$file" "PiliPlus_android_${{ env.version }}_${abi}.apk"
+                    mv "$file" "PiliPlus_android_${{ env.TAG_NAME }}_${abi}.apk"
                   done
               shell: bash
 
+            # 修改：去掉了tag非空判断，只要手动触发就发布
             - name: Release
-              if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+              if: ${{ github.event_name == 'workflow_dispatch' }}
               uses: softprops/action-gh-release@v3
               with:
-                  tag_name: ${{ github.event.inputs.tag }}
-                  name: ${{ github.event.inputs.tag }}
+                  tag_name: ${{ env.TAG_NAME }}
+                  name: ${{ env.TAG_NAME }}
                   files: PiliPlus_android_*.apk
 
             - name: 上传

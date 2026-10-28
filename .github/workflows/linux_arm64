@@ -1,0 +1,211 @@
+name: Build for Linux arm64
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "tag"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - main
+      - linux-arm64-support
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Cache Docker image
+        id: docker-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/piliplus-arm64-image.tar
+          key: docker-arm64-v4
+
+      - name: Build Docker image
+        if: steps.docker-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/build
+          cat > /tmp/build/Dockerfile << 'DOCKERFILE_EOF'
+          FROM ubuntu:24.04
+
+          ENV DEBIAN_FRONTEND=noninteractive
+          ENV FLUTTER_ROOT=/root/flutter
+
+          RUN apt-get update && apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev unzip fonts-noto fonts-noto-color-emoji \
+            libasound2-dev rpm patchelf libmpv-dev webkit2gtk-4.1 libwebkit2gtk-4.1-dev \
+            gcc g++ autoconf automake debhelper glslang-dev ladspa-sdk xutils-dev \
+            libarchive-dev libbluray-dev libbs2b-dev libcaca-dev libcdio-paranoia-dev libdrm-dev \
+            libdav1d-dev libdvdnav-dev libegl1-mesa-dev libepoxy-dev libfontconfig-dev libfreetype6-dev \
+            libfribidi-dev libgl1-mesa-dev libgbm-dev libgme-dev libgsm1-dev libharfbuzz-dev libjpeg-dev \
+            libbrotli-dev liblcms2-dev libmodplug-dev libmp3lame-dev libopenal-dev \
+            libopus-dev libopencore-amrnb-dev libpulse-dev librtmp-dev \
+            libsdl2-dev libsixel-dev libssh-dev libsoxr-dev libspeex-dev libtool \
+            libv4l-dev libva-dev libvdpau-dev libvorbis-dev \
+            libunwind-dev libvpx-dev libwayland-dev libx11-dev libxext-dev \
+            libxkbcommon-dev libxrandr-dev libxss-dev libxv-dev libxvidcore-dev \
+            linux-libc-dev nasm pkg-config python3 wget curl git && \
+            rm -rf /var/lib/apt/lists/*
+
+          RUN wget -q https://github.com/PowerShell/PowerShell/releases/download/v7.4.12/powershell-7.4.12-linux-arm64.tar.gz && \
+              mkdir -p /usr/local/powershell && \
+              tar xf powershell-7.4.12-linux-arm64.tar.gz -C /usr/local/powershell && \
+              rm powershell-7.4.12-linux-arm64.tar.gz && \
+              chmod +x /usr/local/powershell/pwsh && \
+              ln -s /usr/local/powershell/pwsh /usr/bin/pwsh
+
+          RUN wget -q https://github.com/zhzhzhy/Flutter-SDK-ARM64/releases/download/Flutter-SDK-2026-07-02/Flutter-SDK-ARM64.zip && \
+              unzip -q Flutter-SDK-ARM64.zip -d /root && \
+              rm Flutter-SDK-ARM64.zip
+
+          RUN git config --global --add safe.directory /root/flutter && \
+              /root/flutter/bin/flutter config --enable-linux-desktop && \
+              /root/flutter/bin/flutter --version
+
+          WORKDIR /workspace
+          DOCKERFILE_EOF
+
+          docker build --platform linux/arm64 -t piliplus-arm64-build /tmp/build
+          docker save piliplus-arm64-build -o /tmp/piliplus-arm64-image.tar
+
+      - name: Load Docker image
+        if: steps.docker-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/piliplus-arm64-image.tar
+
+      - name: Cache Flutter pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: .pub-cache
+          key: flutter-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            flutter-pub-
+
+      - name: Build in Docker
+        run: |
+          mkdir -p .pub-cache
+          cat > /tmp/build_script.sh << 'SCRIPT_EOF'
+          #!/bin/bash
+          set -x
+          touch /tmp/github_env
+          cd /workspace
+          git config --global --add safe.directory /workspace
+          export PATH="/root/flutter/bin:$PATH"
+          echo "=== Architecture ==="
+          uname -m
+          echo "=== Running build.ps1 ==="
+          /usr/local/powershell/pwsh -Command 'lib/scripts/build.ps1' || { echo "build.ps1 failed with exit code $?"; exit 1; }
+          echo "=== Running patch.ps1 ==="
+          /usr/local/powershell/pwsh -Command 'lib/scripts/patch.ps1 Linux' || { echo "patch.ps1 failed with exit code $?"; exit 1; }
+          echo "=== Flutter build ==="
+          /root/flutter/bin/flutter build linux --release --pub --dart-define-from-file=pili_release.json || { echo "flutter build failed with exit code $?"; exit 1; }
+          echo "=== Build result ==="
+          file build/linux/arm64/release/bundle/piliplus
+          SCRIPT_EOF
+          chmod +x /tmp/build_script.sh
+          docker run --rm --platform linux/arm64 \
+            -v "$(pwd):/workspace" \
+            -v "$(pwd)/.pub-cache:/root/.pub-cache" \
+            -v "/tmp/build_script.sh:/tmp/build_script.sh:ro" \
+            -e GITHUB_ENV=/tmp/github_env \
+            -e GITHUB_WORKSPACE=/workspace \
+            -e FLUTTER_ROOT=/root/flutter \
+            piliplus-arm64-build \
+            bash /tmp/build_script.sh
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(grep -E '^version:' pubspec.yaml | awk '{print $2}')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Package .tar.gz
+        run: |
+          tar -zcvf PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64.tar.gz -C build/linux/arm64/release/bundle .
+
+      - name: Package deb
+        run: |
+          mkdir "PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64"
+          pushd "PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64"
+          mkdir -p opt/PiliPlus
+          mkdir -p usr/share/applications
+          mkdir -p usr/share/icons/hicolor/512x512/apps
+
+          cp -r ../build/linux/arm64/release/bundle/* opt/PiliPlus
+          cp -r ../assets/linux/DEBIAN .
+          cp ../assets/linux/com.example.piliplus.desktop usr/share/applications
+          cp ../assets/images/logo/logo.png usr/share/icons/hicolor/512x512/apps/piliplus.png
+
+          sed -i "s/Architecture: amd64/Architecture: arm64/g" DEBIAN/control
+          sed -i "2s/version_need_change/${{ steps.get_version.outputs.VERSION }}/g" DEBIAN/control
+          SIZE_KB=$(du -s -b --apparent-size . | awk '{print int($1)}')
+          SIZE_KB=$(($SIZE_KB - $(du -s -b --apparent-size DEBIAN | awk '{print int($1)}')))
+          SIZE_KB=$(echo $SIZE_KB | awk '{print int($1/1024 + 0.999)}')
+          sed -i "9s/size_need_change/${SIZE_KB}/g" DEBIAN/control
+
+          md5sum opt/PiliPlus/piliplus >> DEBIAN/md5sums
+          md5sum opt/PiliPlus/lib/* >> DEBIAN/md5sums
+          md5sum opt/PiliPlus/data/icudtl.dat >> DEBIAN/md5sums
+
+          chmod 0644 DEBIAN/control
+          chmod 0644 DEBIAN/md5sums
+          chmod 0755 DEBIAN/postinst
+          chmod 0755 DEBIAN/postrm
+          chmod 0755 DEBIAN/prerm
+
+          popd
+          dpkg-deb --build --verbose --root-owner-group "PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64"
+
+      - name: Upload tar.gz
+        uses: actions/upload-artifact@v7
+        with:
+          name: PiliPlus_linux_arm64_tar
+          path: PiliPlus_linux_*_arm64.tar.gz
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v7
+        with:
+          name: PiliPlus_linux_arm64_deb
+          path: PiliPlus_linux_*_arm64.deb
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}-arm64
+          name: PiliPlus v${{ steps.get_version.outputs.VERSION }} Linux ARM64
+          body: |
+            ## Release Notes
+            
+            ### Linux ARM64 Build
+            
+            - Built using Flutter ARM64 SDK from https://github.com/zhzhzhy/Flutter-SDK-ARM64
+            - Fixed Chinese font display issue (方块/口口口)
+            - Updated font family name in pubspec.yaml to match actual font file
+            - Set default fontFamily in ThemeData with fontFamilyFallback for emoji and mathematical symbols
+            - Added Noto Sans CJK SC font for Chinese support
+            - Added Noto Sans font for extended Latin support
+            - Added Noto Sans Math font for mathematical alphanumeric symbols (e.g. 𝐌𝐲 𝐩𝐚𝐢𝐧)
+            - Added Noto Color Emoji font for emoji support
+            
+            ### Assets
+            
+            - PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64.deb (ARM64)
+            - PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64.tar.gz (ARM64)
+          files: |
+            PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64.deb
+            PiliPlus_linux_${{ steps.get_version.outputs.VERSION }}_arm64.tar.gz

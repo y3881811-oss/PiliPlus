@@ -19,35 +19,33 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # 关键变更：使用原生 ARM64 运行器，而非 x86_64 + QEMU 模拟
+    runs-on: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
+      # 已移除 "Set up QEMU" 步骤——原生 ARM64 运行器无需任何模拟层
 
       - name: Cache Docker image
         id: docker-cache
         uses: actions/cache@v4
         with:
           path: /tmp/piliplus-arm64-image.tar
-          key: docker-arm64-v5-flutter3477
+          key: docker-arm64-native-v1
 
       - name: Build Docker image
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/build
           cat > /tmp/build/Dockerfile << 'DOCKERFILE_EOF'
-          # 关键变更：使用预装 Flutter 3.47.7 的多架构镜像，原生支持 linux/arm64
+          # 使用预装 Flutter 3.47.7 的多架构镜像（含 linux/arm64 变体）
+          # PiliPlus 项目要求 Flutter 3.47.7（由 .fvmrc 锁定）
           FROM kitasaitamablues/flutter-sdk:3.47.7
 
           ENV DEBIAN_FRONTEND=noninteractive
-          # Flutter SDK 位于基础镜像的 /root/flutter（该镜像的默认布局）
           ENV FLUTTER_ROOT=/root/flutter
 
           RUN apt-get update && apt-get install -y clang cmake libgtk-3-dev ninja-build libayatana-appindicator3-dev unzip fonts-noto fonts-noto-color-emoji \
@@ -72,7 +70,6 @@ jobs:
               chmod +x /usr/local/powershell/pwsh && \
               ln -s /usr/local/powershell/pwsh /usr/bin/pwsh
 
-          # 确保 Flutter 工具就绪，并预先创建 Pub 缓存目录（防御性措施）
           RUN /root/flutter/bin/flutter config --enable-linux-desktop && \
               /root/flutter/bin/flutter --version && \
               mkdir -p /root/.pub-cache/hosted/pub.dev
@@ -80,7 +77,8 @@ jobs:
           WORKDIR /workspace
           DOCKERFILE_EOF
 
-          docker build --platform linux/arm64 -t piliplus-arm64-build /tmp/build
+          # 在原生 ARM64 运行器上，无需 --platform 参数
+          docker build -t piliplus-arm64-build /tmp/build
           docker save piliplus-arm64-build -o /tmp/piliplus-arm64-image.tar
 
       - name: Load Docker image
@@ -107,7 +105,6 @@ jobs:
           export PATH="/root/flutter/bin:$PATH"
           export FLUTTER_ROOT=/root/flutter
 
-          # 防御性检查：确保 Pub 缓存目录存在
           mkdir -p /root/.pub-cache/hosted/pub.dev
 
           echo "=== Architecture ==="
@@ -125,7 +122,9 @@ jobs:
           file build/linux/arm64/release/bundle/piliplus
           SCRIPT_EOF
           chmod +x /tmp/build_script.sh
-          docker run --rm --platform linux/arm64 \
+
+          # 原生 ARM64 环境，移除 --platform linux/arm64
+          docker run --rm \
             -v "$(pwd):/workspace" \
             -v "$(pwd)/.pub-cache:/root/.pub-cache" \
             -v "/tmp/build_script.sh:/tmp/build_script.sh:ro" \
@@ -200,15 +199,16 @@ jobs:
 
             ### Linux ARM64 Build
 
-            - Built using Flutter 3.47.7 (stable) with Dart 3.13.5
-            - Resolved previous SDK version mismatch (pre-release Dart could not satisfy `>=3.13.0`)
-            - Fixed Chinese font display issue (方块/口口口)
-            - Updated font family name in pubspec.yaml to match actual font file
-            - Set default fontFamily in ThemeData with fontFamilyFallback for emoji and mathematical symbols
-            - Added Noto Sans CJK SC font for Chinese support
-            - Added Noto Sans font for extended Latin support
-            - Added Noto Sans Math font for mathematical alphanumeric symbols (e.g. 𝐌𝐲 𝐩𝐚𝐢𝐧)
-            - Added Noto Color Emoji font for emoji support
+            - 使用 **原生 ARM64 托管运行器** (`ubuntu-24.04-arm`) 构建，无 QEMU 模拟开销
+            - 使用 Flutter **3.47.7 stable**（Dart 3.13.5），严格匹配项目 `.fvmrc` 要求[reference:2]
+            - 修复了此前 SDK 版本不匹配导致的依赖解析失败问题
+            - 修复中文显示为方块/口口口的问题
+            - 调整 pubspec.yaml 中字体家族名称，与实际字体文件匹配
+            - 在 ThemeData 中设置默认 fontFamily 及 fontFamilyFallback，覆盖 emoji 与数学符号
+            - 添加 Noto Sans CJK SC 字体，支持中文显示
+            - 添加 Noto Sans 字体，扩展拉丁字符支持
+            - 添加 Noto Sans Math 字体，支持数学字母数字符号（如 𝐌𝐲 𝐩𝐚𝐢𝐧）
+            - 添加 Noto Color Emoji 字体，支持彩色 emoji
 
             ### Assets
 

@@ -10,7 +10,6 @@ on:
         type: string
   push:
     branches:
-      - main
       - linux-arm64-support
   workflow_dispatch:
 

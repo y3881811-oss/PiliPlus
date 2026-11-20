@@ -19,7 +19,6 @@ permissions:
 
 jobs:
   build:
-    # 原生 ARM64 运行器，公开仓库免费，4 vCPU / 16 GB RAM
     runs-on: ubuntu-24.04-arm
 
     steps:
@@ -27,27 +26,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 不再需要 QEMU 步骤
-
       - name: Cache Docker image
         id: docker-cache
         uses: actions/cache@v4
         with:
           path: /tmp/piliplus-arm64-image.tar
-          # 更新 key 以强制刷新缓存，避免命中旧镜像
-          key: docker-arm64-devcontainer-v1
+          key: docker-arm64-lahaluhem-v1
 
       - name: Build Docker image
         if: steps.docker-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/build
           cat > /tmp/build/Dockerfile << 'DOCKERFILE_EOF'
-          # 关键变更：使用基于 Ubuntu 的 DevContainer 镜像，包含 apt-get 且支持 arm64
-          # Flutter 3.47.7 已预装，满足项目 .fvmrc 要求
-          FROM alihaidar199527/flutter-devcontainer:flutter-3.47.7.1
+          # 使用 lahaluhem 的稳定多架构镜像，基于 Ubuntu，原生支持 arm64
+          FROM ghcr.io/lahaluhem/flutter:3.47
 
           ENV DEBIAN_FRONTEND=noninteractive
-          # 该镜像的 Flutter 通常安装在 /opt/flutter，而非 /root/flutter
+          # 该镜像通常将 Flutter 置于 /opt/flutter
           ENV FLUTTER_ROOT=/opt/flutter
           ENV PATH="${FLUTTER_ROOT}/bin:${PATH}"
 
@@ -73,7 +68,6 @@ jobs:
               chmod +x /usr/local/powershell/pwsh && \
               ln -s /usr/local/powershell/pwsh /usr/bin/pwsh
 
-          # 验证 Flutter 可用，并预先创建 Pub 缓存目录
           RUN flutter config --enable-linux-desktop && \
               flutter --version && \
               mkdir -p /root/.pub-cache/hosted/pub.dev
@@ -81,7 +75,6 @@ jobs:
           WORKDIR /workspace
           DOCKERFILE_EOF
 
-          # 原生 ARM64 环境，无需 --platform 参数
           docker build -t piliplus-arm64-build /tmp/build
           docker save piliplus-arm64-build -o /tmp/piliplus-arm64-image.tar
 
@@ -107,7 +100,6 @@ jobs:
           cd /workspace
           git config --global --add safe.directory /workspace
 
-          # Flutter 已在 PATH 中（由 Dockerfile 的 ENV 设置）
           mkdir -p /root/.pub-cache/hosted/pub.dev
 
           echo "=== Architecture ==="
@@ -202,14 +194,14 @@ jobs:
             ### Linux ARM64 Build
 
             - 使用 **原生 ARM64 托管运行器** (`ubuntu-24.04-arm`) 构建，无 QEMU 模拟开销
-            - 使用 **Flutter 3.47.7** DevContainer 镜像（Dart 3.13.5），严格匹配项目 `.fvmrc`
-            - 修复了此前 SDK 版本不匹配导致的依赖解析失败问题
+            - 使用 `ghcr.io/lahaluhem/flutter:3.47` 镜像（Dart 3.13.5），满足项目 `.fvmrc` 要求
+            - 修复了此前镜像拉取失败和 SDK 版本不匹配的问题
             - 修复中文显示为方块/口口口的问题
             - 调整 pubspec.yaml 中字体家族名称，与实际字体文件匹配
             - 在 ThemeData 中设置默认 fontFamily 及 fontFamilyFallback，覆盖 emoji 与数学符号
             - 添加 Noto Sans CJK SC 字体，支持中文显示
             - 添加 Noto Sans 字体，扩展拉丁字符支持
-            - 添加 Noto Sans Math 字体，支持数学字母数字符号（如 𝐌𝐲 𝐩𝐚𝐢𝐧）
+            - 添加 Noto Sans Math 字体，支持数学字母数字符号
             - 添加 Noto Color Emoji 字体，支持彩色 emoji
 
             ### Assets
